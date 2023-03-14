@@ -18,7 +18,10 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from dataset.birds_dataset import BirdsDataset, ListLoader
 from utils import augmentations
 
-import apex.amp as amp
+#import apex.amp as amp
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 config = {
     "num_classes": 11120,
@@ -47,8 +50,8 @@ def evaluate(net, eval_loader, args):
     sum_accuracy = 0
     for iteration in range(len(eval_loader)):
         images, type_ids = next(batch_iterator)
-        images = Variable(images.cuda()) / 255.0
-        type_ids = Variable(type_ids.cuda())
+        images = Variable(images.to(device)) / 255.0
+        type_ids = Variable(type_ids.to(device))
 
         # forward
         if args.fp16:
@@ -82,7 +85,7 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
 
     batch_size = x.size()[0]
     if use_cuda:
-        index = torch.randperm(batch_size).cuda()
+        index = torch.randperm(batch_size).to(device)
     else:
         index = torch.randperm(batch_size)
 
@@ -127,7 +130,7 @@ def train(args, train_loader, eval_loader):
         cfg.MODEL.NUM_CLASSES = config["num_classes"]
         net = model_builder.build_model()
 
-    net = net.cuda(device=torch.cuda.current_device())
+    net = net.to(device)
     print("net", net)
 
     if args.finetune:
@@ -163,13 +166,14 @@ def train(args, train_loader, eval_loader):
         threshold_mode="abs",
     )
 
-    net, optimizer = amp.initialize(net, optimizer, opt_level="O2" if args.fp16 else "O0")
+    # net, optimizer = amp.initialize(net, optimizer, opt_level="O2" if args.fp16 else "O0")
 
-    aug = augmentations.Augmentations().cuda()
+    aug = augmentations.Augmentations().to(device)
     batch_iterator = iter(train_loader)
     sum_accuracy = 0
     step = 0
     config["eval_period"] = len(train_loader.dataset) // args.batch_size // 4
+    config["eval_period"] = min(100, config["eval_period"])
     config["verbose_period"] = config["eval_period"] // 5
 
     for iteration in range(args.resume + 1, sys.maxsize):
@@ -182,16 +186,19 @@ def train(args, train_loader, eval_loader):
         except Exception as e:
             print("Loading data exception:", e)
 
-        images = Variable(images.cuda()).permute(0, 3, 1, 2)
+        images = Variable(images.to(device)).permute(0, 3, 1, 2)
         if args.fp16:
             images = images.half()
         else:
             images = images.float()
-        type_ids = Variable(type_ids.cuda())
+        type_ids = Variable(type_ids.to(device))
 
-        one_hot = torch.cuda.FloatTensor(
+        # one_hot = torch.cuda.FloatTensor(
+        #     type_ids.shape[0], config["num_classes"]
+        # )
+        one_hot = torch.FloatTensor(
             type_ids.shape[0], config["num_classes"]
-        )
+        ).to(device)
         one_hot.fill_((1 - 0.5) / config["num_classes"])
         one_hot.scatter_(1, type_ids.unsqueeze(1), 0.5)
 
@@ -223,6 +230,7 @@ def train(args, train_loader, eval_loader):
             optimizer.step()
 
         t1 = time.time()
+        # print(f"{iteration}: {t1 - t0:.2f}s")
 
         if iteration % config["verbose_period"] == 0:
             # accuracy
@@ -232,8 +240,7 @@ def train(args, train_loader, eval_loader):
             print(
                 "iter: %d loss: %.4f | acc: %.4f | time: %.4f sec."
                 % (iteration, loss.item(), accuracy, (t1 - t0)),
-                flush=True,
-            )
+                flush=True,)
             sum_accuracy += accuracy
             step += 1
 
@@ -241,21 +248,21 @@ def train(args, train_loader, eval_loader):
         if iteration < warmup_steps:
             warmup_learning_rate(optimizer, iteration, warmup_steps)
 
-        if (
-            iteration % config["eval_period"] == 0
-            and iteration != 0
-            and step != 0
-        ):
-            with torch.no_grad():
-                loss, accuracy = evaluate(net, eval_loader, args)
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(
-                f"[{now}] Eval accuracy: {accuracy:.4f} | Train accuracy: {sum_accuracy/step:.4f}",
-                flush=True,
-            )
-            scheduler.step(accuracy)
-            sum_accuracy = 0
-            step = 0
+#        if (
+#            iteration % config["eval_period"] == 0
+#            and iteration != 0
+#            and step != 0
+#        ):
+#            with torch.no_grad():
+#                loss, accuracy = evaluate(net, eval_loader, args)
+#            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#            print(
+#                f"[{now}] Eval accuracy: {accuracy:.4f} | Train accuracy: {sum_accuracy/step:.4f}",
+#                flush=True,
+#            )
+#            scheduler.step(accuracy)
+#            sum_accuracy = 0
+#            step = 0
 
         if iteration % config["eval_period"] == 0 and iteration != 0:
             # save checkpoint

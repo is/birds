@@ -22,8 +22,8 @@ class ListLoader(object):
         for directory in os.walk(root_path):
             for dir_name in directory[1]:  # All subdirectories
                 # Since V5 dataset, we directly use dir_name as id
-                type_id = int(dir_name)
-                type_name = dir_name
+                type_id = int(dir_name.partition(".")[0])
+                type_name = dir_name.partition(".")[2]
                 if type_id < 0 or type_id > num_classes:
                     print("Wrong directory: {}!".format(dir_name))
                     continue

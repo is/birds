@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 IMAGE_SHAPE = (300, 300)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def generate_grid(h, w):
     x = torch.arange(0, h, dtype=torch.int)
@@ -17,9 +19,9 @@ class Augmentations(nn.Module):
 
     def __init__(self):
         super(Augmentations, self).__init__()
-        self.gaussian_blur = nn.Conv2d(3, 3, (3, 3), padding=1, groups=3, bias=False).cuda()
-        self.heavy_blur = nn.Conv2d(3, 3, (5, 5), padding=2, groups=3, bias=False).cuda()
-        self.dropout = nn.Dropout(p=0.1).cuda()
+        self.gaussian_blur = nn.Conv2d(3, 3, (3, 3), padding=1, groups=3, bias=False).to(device)
+        self.heavy_blur = nn.Conv2d(3, 3, (5, 5), padding=2, groups=3, bias=False).to(device)
+        self.dropout = nn.Dropout(p=0.1).to(device)
 
     def _image_part(self, split, coordinates, index):
         coord = coordinates[index]
@@ -34,7 +36,7 @@ class Augmentations(nn.Module):
             nx1, nx2, ny1, ny2 = self._image_part(split, coordinates, index)
             ox1, ox2, oy1, oy2 = self._image_part(split, coordinates, offset)
             image[:, :, nx1:nx2, ny1:ny2] = raw_image[:, :, ox1:ox2, oy1:oy2]
-            dim = torch.rand(1, device='cuda').round().long().data.item() + 2
+            dim = torch.rand(1).to(device).round().long().data.item() + 2
             image[:, :, nx1:nx2, ny1:ny2] = torch.flip(raw_image[:, :, ox1:ox2, oy1:oy2], (dim,))
         return image
 
@@ -48,11 +50,11 @@ class Augmentations(nn.Module):
         image += gaussian_noise * noise_scale'''
 
         # Contrast 0.6 ~ 1.4
-        gamma = 0.8 * torch.rand(1, device='cuda') + 0.6
+        gamma = 0.8 * torch.rand(1).to(device) + 0.6
         image *= gamma
 
         # Brightness -30 ~ 30
-        brightness = 60 * torch.rand(1, device='cuda') - 30
+        brightness = 60 * torch.rand(1).to(device) - 30
         image += brightness
 
         image = torch.clamp(image, 0, 255)
@@ -66,7 +68,7 @@ class Augmentations(nn.Module):
         #    image = self.heavy_blur(image)'''
 
         # Flip horizontal or vertical for NCHW
-        dim = torch.rand(1, device='cuda').round().long().data.item() + 2
+        dim = torch.rand(1).to(device).round().long().data.item() + 2
         image = torch.flip(image, (dim,))
 
         # Rotate -90 ~ 90
@@ -115,9 +117,9 @@ if __name__ == '__main__':
         image = cv2.resize(image, IMAGE_SHAPE)
         images.append(image)
 
-    images = torch.Tensor(images).cuda().permute(0, 3, 1, 2).float()
+    images = torch.Tensor(images).to(device).permute(0, 3, 1, 2).float()
 
-    aug = Augmentations().cuda()
+    aug = Augmentations().to(device)
     imgs = aug(images).permute(0, 2, 3, 1).byte()
 
     for index, img in enumerate(imgs):
